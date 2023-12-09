@@ -8,12 +8,18 @@ import (
 	_ "github.com/lib/pq"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"golang.org/x/image/draw"
 )
 
 type Image struct {
@@ -113,6 +119,38 @@ func storeImage(db *gorm.DB, imagePath string) error {
 	return result.Error
 }
 
+func resizeImage(filePath string, width, height int) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+
+	img, format, err := image.Decode(file)
+	if err != nil {
+		file.Close()
+		return err
+	}
+	file.Close()
+
+	newImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.ApproxBiLinear.Scale(newImg, newImg.Bounds(), img, img.Bounds(), draw.Over, nil)
+
+	outPutFile, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer outPutFile.Close()
+
+	switch strings.ToLower(format) {
+	case "jpeg":
+		return jpeg.Encode(outPutFile, newImg, nil)
+	case "png":
+		return png.Encode(outPutFile, newImg)
+	default:
+		return fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
 func main() {
 	var (
 		query      string
@@ -164,6 +202,10 @@ func main() {
 		} else {
 			fmt.Println("Downloaded:", fileName)
 			imagePath := fileName
+			if err := resizeImage(fileName, 800, 600); err != nil {
+				fmt.Printf("Failed resizing image: %v\n", err)
+				return
+			}
 
 			if err := storeImage(db, imagePath); err != nil {
 				fmt.Printf("Failed to store images to DB: %v\n", err)
